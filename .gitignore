@@ -1,0 +1,146 @@
+# ---------------------------------------------------------------------------
+# Unimote monorepo: dashboard/ (Rails) + unimote_app/ (React Native)
+# Each sub-project keeps its own .gitignore; this file covers everything
+# shared and acts as a safety net so nothing sensitive or generated slips in.
+# ---------------------------------------------------------------------------
+
+# --- OS ---
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# --- Editors / IDEs ---
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.iml
+*.swp
+*.swo
+*~
+.history/
+
+# --- Claude Code (local, per-machine) ---
+.claude/settings.local.json
+.claude/worktrees/
+
+# --- Secrets & environment (never commit) ---
+.env
+.env.*
+!.env.example
+!.env.sample
+*.key
+*.pem
+*.p8
+*.p12
+*.pfx
+*.jks
+*.keystore
+!debug.keystore
+*.mobileprovision
+*.cer
+**/config/master.key
+**/config/credentials/*.key
+**/google-services.json
+**/GoogleService-Info.plist
+**/local.properties
+**/gradle.properties.local
+service-account*.json
+
+# --- Logs, temp, coverage ---
+*.log
+log/*
+!log/.keep
+**/log/*
+!**/log/.keep
+tmp/*
+!tmp/.keep
+**/tmp/*
+!**/tmp/.keep
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pids
+*.pid
+*.seed
+*.pid.lock
+coverage/
+.nyc_output/
+*.tmp
+*.bak
+*.orig
+
+# --- Dependencies & build output ---
+node_modules/
+**/node_modules/
+build/
+dist/
+out/
+.cache/
+.parcel-cache/
+
+# --- Ruby / Rails (dashboard/) ---
+.bundle/
+**/.bundle/
+vendor/bundle/
+/dashboard/public/assets
+/dashboard/public/packs
+/dashboard/public/packs-test
+/dashboard/storage/*
+!/dashboard/storage/.keep
+/dashboard/db/*.sqlite3
+/dashboard/db/*.sqlite3-*
+/dashboard/.byebug_history
+/dashboard/.rspec_status
+*.rbc
+.yardoc/
+/dashboard/spec/examples.txt
+
+# --- React Native / Android / iOS (unimote_app/) ---
+.gradle/
+**/.gradle/
+.cxx/
+.kotlin/
+*.hprof
+*.apk
+*.aab
+*.ap_
+*.dex
+*.jsbundle
+*.ipa
+**/Pods/
+**/DerivedData/
+xcuserdata/
+*.xcuserstate
+*.xccheckout
+*.moved-aside
+*.hmap
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+**/.xcode.env.local
+.metro-health-check*
+**/fastlane/report.xml
+**/fastlane/Preview.html
+**/fastlane/screenshots
+**/fastlane/test_output
+
+# Yarn 3 (keep releases/plugins/patches so everyone uses the same Yarn)
+**/.yarn/*
+!**/.yarn/patches
+!**/.yarn/plugins
+!**/.yarn/releases
+!**/.yarn/sdks
+!**/.yarn/versions
+**/.pnp.*
