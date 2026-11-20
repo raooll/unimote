@@ -13,3 +13,5 @@ if Rails.env.development?
     u.password = u.password_confirmation = "password"
   end
 end
+# Remote catalog (categories, brands, models, configs). Idempotent; also safe in production.
+Rake::Task["catalog:seed"].invoke if defined?(Rake) && Rake::Task.task_defined?("catalog:seed")

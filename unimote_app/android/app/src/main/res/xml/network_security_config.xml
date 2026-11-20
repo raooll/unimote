@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Smart TVs (Roku ECP, older Samsung/LG) are controlled over plain HTTP/WS on the local network, which Android
+  blocks by default in release builds. The Unimote API itself is HTTPS only (see DEFAULT_API_URL).
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

@@ -1,0 +1,1153 @@
+openapi: 3.0.3
+info:
+  title: Unimote API
+  version: v1
+  description: |
+    JSON API for the Unimote universal-remote app.
+
+    **Login is optional.** Every catalog endpoint (browse brands, search models, download remotes,
+    match wizard, feedback, submissions) works for anonymous users. An account is only needed for the
+    cloud-synced data (`rooms`, `saved_remotes`, `scenes`, `sync`) and `me`.
+
+    **Guests** should send a stable random `X-Install-Id` header so their match feedback and
+    submissions can be attributed to the install.
+
+    **Authentication:** `Authorization: Bearer <token>` using the token returned by sign up / sign in.
+    Signing out rotates the user's token id and invalidates *all* of that user's tokens.
+
+    **Errors** always look like `{ "error": { "code": "...", "message": "...", "details": {...} } }`.
+
+    **Rate limits:** the API is throttled per IP (300 requests / 5 min); auth endpoints and submissions have
+    stricter limits and answer `429` when exceeded.
+servers:
+  - url: http://localhost:3000
+    description: Local development
+tags:
+  - name: Catalog
+    description: Browse and search the remote catalog (public).
+  - name: Remotes
+    description: Download remotes and run the code-matching wizard (public).
+  - name: Feedback
+    description: Match feedback and user-recorded remotes (public).
+  - name: Auth
+    description: Optional accounts.
+  - name: Me
+    description: The signed-in user's profile.
+  - name: Sync
+    description: Cloud-synced rooms, saved remotes and scenes (login required).
+  - name: System
+    description: Health.
+
+paths:
+  /api/v1/health:
+    get:
+      tags: [System]
+      summary: Health check
+      operationId: health
+      responses:
+        "200":
+          description: Service is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  version: { type: string, example: v1 }
+
+  /api/v1/layouts:
+    get:
+      tags: [Catalog]
+      summary: UI layout templates
+      description: |
+        The layout templates the app renders remotes from. A remote's `layout_template` names one of these.
+        Buttons whose command the remote does not have should be hidden; commands that no layout button
+        covers should be listed under "other buttons". Cached for 1 hour.
+      operationId: listLayouts
+      responses:
+        "200":
+          description: Layouts.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  layouts:
+                    type: array
+                    items: { $ref: "#/components/schemas/Layout" }
+
+  /api/v1/categories:
+    get:
+      tags: [Catalog]
+      summary: Device categories
+      description: Only categories that have at least one published remote, in display order.
+      operationId: listCategories
+      responses:
+        "200":
+          description: Categories.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  categories:
+                    type: array
+                    items: { $ref: "#/components/schemas/Category" }
+
+  /api/v1/brands:
+    get:
+      tags: [Catalog]
+      summary: Brands (for the brand picker)
+      description: Brands that have a published remote, optionally within one category. `q` does fuzzy/prefix search.
+      operationId: listBrands
+      parameters:
+        - { name: category, in: query, schema: { type: string, example: tv }, description: Category slug. }
+        - { name: q, in: query, schema: { type: string, example: sam }, description: Search text. }
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+      responses:
+        "200":
+          description: Brands.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  brands:
+                    type: array
+                    items: { $ref: "#/components/schemas/Brand" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+
+  /api/v1/models:
+    get:
+      tags: [Catalog]
+      summary: Models with their published remote variants
+      description: Config summaries only (no signal data). `q` searches model and brand names.
+      operationId: listModels
+      parameters:
+        - { name: category, in: query, schema: { type: string, example: tv }, description: Category slug. }
+        - { name: brand, in: query, schema: { type: string, example: samsung }, description: Brand slug. }
+        - { name: q, in: query, schema: { type: string, example: AA59 }, description: Search text. }
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+      responses:
+        "200":
+          description: Models.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  models:
+                    type: array
+                    items: { $ref: "#/components/schemas/Model" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+
+  /api/v1/remotes/match:
+    get:
+      tags: [Remotes]
+      summary: Code-matching wizard candidates
+      description: |
+        Candidate remotes for a category (and optionally a brand), best first: a typed `model` match, then codes
+        shared by many models, then popularity. Code sets whose test signal is identical are collapsed into one
+        candidate (`shared_by` = how many other models use that exact code), so the wizard never asks the user to
+        test the same signal twice. Each candidate carries one `test` signal (Power, else Mute, else the first
+        command). Max 12 candidates for a brand.
+
+        Omit `brand` for a generic "try common codes" list across all brands (IR only unless `protocol` is given;
+        max 25). Report the answer with `POST /remotes/{id}/reports`.
+      operationId: matchRemotes
+      parameters:
+        - { name: category, in: query, required: true, schema: { type: string, example: ac } }
+        - { name: brand, in: query, schema: { type: string, example: daikin }, description: Brand slug or name. Omit for generic codes across all brands. }
+        - { name: model, in: query, schema: { type: string, example: FTKF50 } }
+        - { name: protocol, in: query, schema: { $ref: "#/components/schemas/Protocol" } }
+      responses:
+        "200":
+          description: Candidates (possibly empty).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  candidates:
+                    type: array
+                    items: { $ref: "#/components/schemas/MatchCandidate" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/v1/remotes/{id}:
+    get:
+      tags: [Remotes]
+      summary: Download a remote
+      description: |
+        The full remote (layout + signal data) the app stores for offline use. Send `If-None-Match` with the
+        previous `ETag` to refresh cheaply: an unchanged remote answers `304`. Draft/archived remotes are `404`.
+      operationId: getRemote
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: If-None-Match, in: header, schema: { type: string } }
+      responses:
+        "200":
+          description: The remote.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  remote: { $ref: "#/components/schemas/Remote" }
+        "304": { description: Not modified. }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/remotes/{remote_id}/reports:
+    post:
+      tags: [Feedback]
+      summary: Report whether a remote worked
+      description: |
+        The answer to the wizard's "did your device react?". Raises the remote's popularity when `worked` is
+        true and lowers it otherwise. Guests must send `X-Install-Id`.
+      operationId: createReport
+      parameters:
+        - { name: remote_id, in: path, required: true, schema: { type: integer } }
+        - $ref: "#/components/parameters/InstallId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [worked]
+              properties:
+                worked: { type: boolean }
+      responses:
+        "201":
+          description: Recorded.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: integer }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Invalid" }
+
+  /api/v1/submissions:
+    post:
+      tags: [Feedback]
+      summary: Submit a user-recorded remote
+      description: |
+        A remote the user learned/recorded. It is stored as `pending` and published only after admin review.
+        Guests must send `X-Install-Id`. Limited to 10 per hour per IP.
+      operationId: createSubmission
+      parameters:
+        - $ref: "#/components/parameters/InstallId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [submission]
+              properties:
+                submission: { $ref: "#/components/schemas/SubmissionInput" }
+      responses:
+        "201":
+          description: Accepted for review.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: integer }
+                  status: { type: string, example: pending }
+        "422": { $ref: "#/components/responses/Invalid" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/v1/model_requests:
+    post:
+      tags: [Feedback]
+      summary: Ask for a brand or model to be added
+      description: |
+        "Please add this device." Works as a guest (send `X-Install-Id`). Identical requests (same brand, model and
+        category, ignoring case) are merged and counted once per person, so admins can rank requests by demand.
+        Leave `model_name` empty when the brand itself is missing. Limited to 20 per hour per IP.
+      operationId: createModelRequest
+      parameters:
+        - $ref: "#/components/parameters/InstallId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model_request]
+              properties:
+                model_request:
+                  type: object
+                  required: [brand_name, category]
+                  properties:
+                    brand_name: { type: string, example: Hisense }
+                    model_name: { type: string, example: A6H }
+                    category: { type: string, example: tv, description: Category slug. }
+                    notes: { type: string, maxLength: 1000 }
+      responses:
+        "201":
+          description: Recorded.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: integer }
+                  status: { type: string, example: open }
+                  requests_count: { type: integer, example: 3 }
+        "422": { $ref: "#/components/responses/Invalid" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/v1/auth/sign_up:
+    post:
+      tags: [Auth]
+      summary: Create an account
+      operationId: signUp
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user]
+              properties:
+                user:
+                  type: object
+                  required: [email, password]
+                  properties:
+                    email: { type: string, format: email }
+                    password: { type: string, minLength: 8, maxLength: 128 }
+                    name: { type: string, maxLength: 80 }
+                    locale: { type: string, example: en }
+      responses:
+        "201": { $ref: "#/components/responses/AuthSuccess" }
+        "422": { $ref: "#/components/responses/Invalid" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/v1/auth/sign_in:
+    post:
+      tags: [Auth]
+      summary: Sign in
+      operationId: signIn
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user]
+              properties:
+                user:
+                  type: object
+                  required: [email, password]
+                  properties:
+                    email: { type: string, format: email }
+                    password: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/AuthSuccess" }
+        "401":
+          description: "Invalid email or password (code: invalid_credentials)."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/v1/auth/sign_out:
+    delete:
+      tags: [Auth]
+      summary: Sign out everywhere
+      description: Invalidates every token issued to this user.
+      operationId: signOut
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204": { description: Signed out. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/auth/password:
+    post:
+      tags: [Auth]
+      summary: Request a password reset email
+      description: Always answers `202`, whether or not the email exists. The email links to the app with a reset token.
+      operationId: requestPasswordReset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        "202": { description: If the account exists, an email was sent. }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+    put:
+      tags: [Auth]
+      summary: Set a new password with a reset token
+      description: Signs the user out everywhere and returns a fresh token.
+      operationId: resetPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reset_password_token, password]
+              properties:
+                reset_password_token: { type: string }
+                password: { type: string, minLength: 8, maxLength: 128 }
+                password_confirmation: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/AuthSuccess" }
+        "422": { $ref: "#/components/responses/Invalid" }
+
+  /api/v1/me:
+    get:
+      tags: [Me]
+      summary: Current user
+      operationId: getMe
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: The user.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      tags: [Me]
+      summary: Update profile
+      operationId: updateMe
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user]
+              properties:
+                user:
+                  type: object
+                  properties:
+                    name: { type: string }
+                    locale: { type: string }
+      responses:
+        "200":
+          description: The updated user.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/Invalid" }
+    patch:
+      tags: [Me]
+      summary: Update profile (same as PUT)
+      operationId: patchMe
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user]
+              properties:
+                user:
+                  type: object
+                  properties:
+                    name: { type: string }
+                    locale: { type: string }
+      responses:
+        "200":
+          description: The updated user.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    delete:
+      tags: [Me]
+      summary: Delete the account and all synced data
+      operationId: deleteMe
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/rooms:
+    get:
+      tags: [Sync]
+      summary: List rooms
+      operationId: listRooms
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UpdatedSince"
+      responses:
+        "200":
+          description: Rooms.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Room" }
+                  server_time: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/rooms/{client_uuid}:
+    parameters:
+      - $ref: "#/components/parameters/ClientUuid"
+    put:
+      tags: [Sync]
+      summary: Create or update a room (upsert)
+      operationId: upsertRoom
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [room]
+              properties:
+                room:
+                  type: object
+                  required: [name]
+                  properties:
+                    name: { type: string, example: Living Room }
+                    icon: { type: string, example: sofa }
+                    position: { type: integer }
+      responses:
+        "200":
+          description: The room.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  item: { $ref: "#/components/schemas/Room" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/Invalid" }
+    delete:
+      tags: [Sync]
+      summary: Delete a room (its remotes are kept, unassigned)
+      operationId: deleteRoom
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204": { description: Deleted (also when it did not exist). }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/saved_remotes:
+    get:
+      tags: [Sync]
+      summary: List saved remotes
+      operationId: listSavedRemotes
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UpdatedSince"
+      responses:
+        "200":
+          description: Saved remotes.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/SavedRemote" }
+                  server_time: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/saved_remotes/{client_uuid}:
+    parameters:
+      - $ref: "#/components/parameters/ClientUuid"
+    put:
+      tags: [Sync]
+      summary: Create or update a saved remote (upsert)
+      description: |
+        `settings` is free-form per-device state (device IP, IR hub, last AC state, button overrides).
+        `room_client_uuid` must be one of the user's rooms (else 404).
+      operationId: upsertSavedRemote
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [saved_remote]
+              properties:
+                saved_remote:
+                  type: object
+                  required: [name]
+                  properties:
+                    name: { type: string, example: Bedroom AC }
+                    position: { type: integer }
+                    remote_config_id: { type: integer, nullable: true }
+                    room_client_uuid: { type: string, nullable: true }
+                    settings: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: The saved remote.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  item: { $ref: "#/components/schemas/SavedRemote" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Invalid" }
+    delete:
+      tags: [Sync]
+      summary: Delete a saved remote
+      operationId: deleteSavedRemote
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204": { description: Deleted (also when it did not exist). }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/scenes:
+    get:
+      tags: [Sync]
+      summary: List scenes (macros)
+      operationId: listScenes
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UpdatedSince"
+      responses:
+        "200":
+          description: Scenes.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Scene" }
+                  server_time: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/scenes/{client_uuid}:
+    parameters:
+      - $ref: "#/components/parameters/ClientUuid"
+    put:
+      tags: [Sync]
+      summary: Create or update a scene (upsert)
+      description: Each step needs a `command`. At most 50 steps.
+      operationId: upsertScene
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scene]
+              properties:
+                scene:
+                  type: object
+                  required: [name]
+                  properties:
+                    name: { type: string, example: Movie night }
+                    icon: { type: string }
+                    position: { type: integer }
+                    steps:
+                      type: array
+                      maxItems: 50
+                      items: { $ref: "#/components/schemas/SceneStep" }
+      responses:
+        "200":
+          description: The scene.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  item: { $ref: "#/components/schemas/Scene" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/Invalid" }
+    delete:
+      tags: [Sync]
+      summary: Delete a scene
+      operationId: deleteScene
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204": { description: Deleted (also when it did not exist). }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/sync:
+    get:
+      tags: [Sync]
+      summary: Everything in the account
+      operationId: getSync
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Full snapshot.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SyncSnapshot" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Sync]
+      summary: Bulk upsert (merge guest data after first sign-in)
+      description: |
+        Upserts rooms, then saved remotes, then scenes (so saved remotes may reference rooms sent in the same
+        request) in one transaction, at most 200 of each, and returns the full snapshot.
+      operationId: postSync
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                rooms:
+                  type: array
+                  items:
+                    allOf:
+                      - { $ref: "#/components/schemas/ClientUuidProp" }
+                      - type: object
+                        required: [name]
+                        properties:
+                          name: { type: string }
+                          icon: { type: string }
+                          position: { type: integer }
+                saved_remotes:
+                  type: array
+                  items:
+                    allOf:
+                      - { $ref: "#/components/schemas/ClientUuidProp" }
+                      - type: object
+                        required: [name]
+                        properties:
+                          name: { type: string }
+                          position: { type: integer }
+                          remote_config_id: { type: integer, nullable: true }
+                          room_client_uuid: { type: string, nullable: true }
+                          settings: { type: object, additionalProperties: true }
+                scenes:
+                  type: array
+                  items:
+                    allOf:
+                      - { $ref: "#/components/schemas/ClientUuidProp" }
+                      - type: object
+                        required: [name]
+                        properties:
+                          name: { type: string }
+                          icon: { type: string }
+                          position: { type: integer }
+                          steps:
+                            type: array
+                            items: { $ref: "#/components/schemas/SceneStep" }
+      responses:
+        "200":
+          description: Full snapshot after the merge.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SyncSnapshot" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/Invalid" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token from sign up / sign in. Not needed for catalog endpoints.
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    PerPage:
+      name: per_page
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 30 }
+    InstallId:
+      name: X-Install-Id
+      in: header
+      description: Stable random id of this app install. Required for guests on feedback and submissions.
+      schema: { type: string, maxLength: 64, example: 7f0c1c1e-8a3e-4a39-b0f0-2f6a1a5f0c11 }
+    ClientUuid:
+      name: client_uuid
+      in: path
+      required: true
+      description: Id generated by the app (e.g. a UUID v4), so records can be created offline.
+      schema: { type: string, example: 3b1f0a52-6d49-4a3e-9d0f-0e5f1f9f7a10 }
+    UpdatedSince:
+      name: updated_since
+      in: query
+      description: Only records changed after this time (use the previous `server_time`).
+      schema: { type: string, format: date-time }
+
+  responses:
+    AuthSuccess:
+      description: The user and a bearer token.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              user: { $ref: "#/components/schemas/User" }
+              token: { type: string }
+    BadRequest:
+      description: Missing parameter (`missing_parameter`).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing, invalid, expired or revoked token (`unauthorized`).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Not found (`not_found`).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Invalid:
+      description: Validation failed (`invalid`); `details` maps fields to messages.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    TooManyRequests:
+      description: Rate limit exceeded.
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string, example: invalid }
+            message: { type: string, example: Email has already been taken }
+            details:
+              type: object
+              additionalProperties: true
+              example: { email: [has already been taken] }
+
+    PageMeta:
+      type: object
+      properties:
+        page: { type: integer }
+        per_page: { type: integer }
+        total: { type: integer }
+        total_pages: { type: integer }
+
+    Protocol:
+      type: string
+      enum: [ir, wifi, ble, bluetooth_hid]
+      description: |
+        `ir` – infrared (phone blaster or Wi-Fi IR hub). `wifi` – smart-TV network protocols (Roku, Samsung, LG).
+        `ble` – Bluetooth LE devices (e.g. RGB light strips). `bluetooth_hid` – phone acts as a Bluetooth remote (Android).
+
+    Category:
+      type: object
+      properties:
+        slug: { type: string, example: tv }
+        name: { type: string, example: TV }
+        icon: { type: string, example: tv }
+        position: { type: integer }
+        default_layout: { type: string, example: tv_standard }
+        models_count: { type: integer, description: Models with a published remote. }
+
+    Brand:
+      type: object
+      properties:
+        slug: { type: string, example: samsung }
+        name: { type: string, example: Samsung }
+        models_count: { type: integer, nullable: true }
+
+    ConfigSummary:
+      type: object
+      properties:
+        id: { type: integer }
+        protocol: { $ref: "#/components/schemas/Protocol" }
+        variant: { type: string, example: Samsung_AA59-00443A }
+        layout_template: { type: string, example: tv_standard }
+        version: { type: integer }
+        checksum: { type: string }
+        popularity: { type: integer }
+        success_rate: { type: number, nullable: true, description: 0..1, null until feedback exists. }
+        commands_count: { type: integer }
+
+    Model:
+      type: object
+      properties:
+        id: { type: integer }
+        slug: { type: string }
+        name: { type: string, example: AA59-00443A }
+        label: { type: string, example: Code set 2, description: Readable name; generic file-name models such as "2" or "Default" are described instead. }
+        display_name: { type: string, example: Samsung AA59-00443A }
+        brand:
+          type: object
+          properties:
+            slug: { type: string }
+            name: { type: string }
+        category: { type: string, example: tv }
+        uncategorised: { type: boolean, description: "True for imported remotes whose device type is unknown (category \"other\"). Listed after categorised ones." }
+        configs:
+          type: array
+          items: { $ref: "#/components/schemas/ConfigSummary" }
+
+    IrSignal:
+      type: object
+      description: Raw IR timing, ready for Android `ConsumerIrManager.transmit(frequency, pattern)` or an IR hub.
+      required: [frequency, pattern]
+      properties:
+        frequency: { type: integer, example: 38000, description: Carrier frequency in Hz. }
+        duty_cycle: { type: number, example: 0.33 }
+        pattern:
+          type: array
+          description: Alternating mark/space durations in microseconds, starting with a mark.
+          items: { type: integer }
+          example: [9000, 4500, 560, 560, 560, 1690]
+
+    SignalData:
+      type: object
+      description: |
+        Shape depends on `protocol`.
+        **ir:** `commands` maps a command name to an `IrSignal`; `labels` maps command names to the original
+        button label when it differs.
+        **ir, AC state table** (layout `ac_state`): an air conditioner sends its whole setting on every press, so
+        `commands` holds one full-state signal per combination: `OFF`, and `<MODE>_<FAN>[_<SWING>]_<TEMP>` (or
+        `<MODE>_<FAN>` / `<MODE>` when a mode has no fan or temperature steps), each normalised to UPPER_SNAKE
+        (`COOL_AUTO_24`, `HEAT_COOL_MEDIUM_22`). Each value is `{ "broadlink": "<base64>" }`: a Broadlink packet at
+        38 kHz that the app decodes to an `IrSignal` (or hands to a Broadlink hub unchanged). `ac` describes what exists:
+        `modes` maps each mode to its `fans`, `swings` and `temps` (raw strings, e.g. `"24"`), plus `min_temp`,
+        `max_temp` and `step`.
+        **wifi:** `driver`, `port`, request template and `commands` (driver-specific values).
+        **ble:** `service_uuid`, `characteristic_uuid`, `commands` (hex payloads), `templates`.
+        **bluetooth_hid:** `commands` map to `{page, usage}` HID usage codes.
+      properties:
+        commands:
+          type: object
+          additionalProperties: true
+        labels:
+          type: object
+          additionalProperties: { type: string }
+        driver: { type: string, example: roku_ecp }
+        ac:
+          type: object
+          description: Present on AC state tables; see above.
+          properties:
+            min_temp: { type: number, example: 16 }
+            max_temp: { type: number, example: 30 }
+            step: { type: number, example: 1 }
+            modes:
+              type: object
+              additionalProperties:
+                type: object
+                properties:
+                  fans: { type: array, items: { type: string } }
+                  swings: { type: array, items: { type: string } }
+                  temps: { type: array, items: { type: string } }
+      additionalProperties: true
+
+    LayoutButton:
+      type: object
+      properties:
+        key: { type: string, example: VOL_UP, description: Canonical command name. }
+        label: { type: string }
+        icon: { type: string }
+
+    LayoutSection:
+      type: object
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [row, dpad, rocker, keypad, grid, ac_state] }
+        buttons:
+          type: array
+          items: { $ref: "#/components/schemas/LayoutButton" }
+        rockers:
+          type: array
+          description: Only for `rocker` sections.
+          items:
+            type: object
+            properties:
+              label: { type: string }
+              up: { $ref: "#/components/schemas/LayoutButton" }
+              down: { $ref: "#/components/schemas/LayoutButton" }
+
+    Layout:
+      type: object
+      properties:
+        key: { type: string, example: tv_standard }
+        name: { type: string, example: TV }
+        categories:
+          type: array
+          items: { type: string }
+        sections:
+          type: array
+          items: { $ref: "#/components/schemas/LayoutSection" }
+
+    Remote:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string, example: Samsung AA59-00443A }
+        brand:
+          type: object
+          properties:
+            slug: { type: string }
+            name: { type: string }
+        model:
+          type: object
+          properties:
+            id: { type: integer }
+            slug: { type: string }
+            name: { type: string }
+        category: { type: string, example: tv }
+        protocol: { $ref: "#/components/schemas/Protocol" }
+        variant: { type: string }
+        layout_template: { type: string, nullable: true }
+        layout:
+          nullable: true
+          type: object
+          properties:
+            name: { type: string }
+            sections:
+              type: array
+              items: { $ref: "#/components/schemas/LayoutSection" }
+        version: { type: integer, description: Increases whenever the signal data changes. }
+        checksum: { type: string }
+        updated_at: { type: string, format: date-time }
+        signal_data: { $ref: "#/components/schemas/SignalData" }
+
+    MatchCandidate:
+      type: object
+      properties:
+        id: { type: integer }
+        model: { type: string }
+        protocol: { $ref: "#/components/schemas/Protocol" }
+        variant: { type: string }
+        layout_template: { type: string }
+        version: { type: integer }
+        popularity: { type: integer }
+        success_rate: { type: number, nullable: true }
+        shared_by: { type: integer, description: Other models that use this exact test signal (collapsed into this candidate). }
+        test:
+          nullable: true
+          type: object
+          description: The signal to fire in the wizard.
+          properties:
+            command: { type: string, example: POWER }
+            signal:
+              description: An `IrSignal` for IR remotes; a driver-specific value for other protocols.
+              oneOf:
+                - { $ref: "#/components/schemas/IrSignal" }
+                - { type: string }
+                - { type: object, additionalProperties: true }
+
+    SubmissionInput:
+      type: object
+      required: [brand_name, model_name, category, signal_data]
+      properties:
+        brand_name: { type: string, example: Acme }
+        model_name: { type: string, example: X1 }
+        category: { type: string, example: tv, description: Category slug. }
+        protocol: { $ref: "#/components/schemas/Protocol" }
+        notes: { type: string, maxLength: 1000 }
+        signal_data:
+          type: object
+          required: [commands]
+          properties:
+            commands:
+              type: object
+              description: Command name to `IrSignal` (frequency 10000-60000 Hz, pattern 2-2000 positive integers).
+              additionalProperties: { $ref: "#/components/schemas/IrSignal" }
+
+    User:
+      type: object
+      properties:
+        id: { type: integer }
+        email: { type: string, format: email }
+        name: { type: string, nullable: true }
+        locale: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    ClientUuidProp:
+      type: object
+      required: [client_uuid]
+      properties:
+        client_uuid: { type: string }
+
+    Room:
+      type: object
+      properties:
+        client_uuid: { type: string }
+        name: { type: string }
+        icon: { type: string, nullable: true }
+        position: { type: integer }
+        updated_at: { type: string, format: date-time }
+
+    SavedRemote:
+      type: object
+      properties:
+        client_uuid: { type: string }
+        name: { type: string }
+        position: { type: integer }
+        remote_config_id: { type: integer, nullable: true }
+        room_client_uuid: { type: string, nullable: true }
+        settings: { type: object, additionalProperties: true }
+        updated_at: { type: string, format: date-time }
+
+    SceneStep:
+      type: object
+      required: [command]
+      properties:
+        remote: { type: string, description: "`client_uuid` of the saved remote to send to." }
+        command: { type: string, example: POWER }
+        delay_ms: { type: integer, example: 200, description: Wait after this step. }
+
+    Scene:
+      type: object
+      properties:
+        client_uuid: { type: string }
+        name: { type: string }
+        icon: { type: string, nullable: true }
+        position: { type: integer }
+        steps:
+          type: array
+          items: { $ref: "#/components/schemas/SceneStep" }
+        updated_at: { type: string, format: date-time }
+
+    SyncSnapshot:
+      type: object
+      properties:
+        rooms:
+          type: array
+          items: { $ref: "#/components/schemas/Room" }
+        saved_remotes:
+          type: array
+          items: { $ref: "#/components/schemas/SavedRemote" }
+        scenes:
+          type: array
+          items: { $ref: "#/components/schemas/Scene" }
+        server_time: { type: string, format: date-time }
