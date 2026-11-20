@@ -7,6 +7,9 @@ Rails.application.routes.draw do
     mount MissionControl::Jobs::Engine, at: "/admin/jobs"
   end
 
+  # The bare domain lands on the API docs
+  root to: redirect("/api-docs", status: 302)
+
   # API documentation (Swagger UI): /api-docs
   mount Rswag::Ui::Engine => "/api-docs"
   mount Rswag::Api::Engine => "/api-docs"
