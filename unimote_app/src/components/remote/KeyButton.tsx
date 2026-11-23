@@ -10,12 +10,14 @@ const REPEATABLE = new Set([
   'BRIGHTNESS_UP', 'BRIGHTNESS_DOWN', 'SPEED_UP', 'SPEED_DOWN',
 ]);
 
-export function KeyButton({ button, label, onPress, size = 'md', accent, className = '' }: {
+export function KeyButton({ button, label, onPress, size = 'md', accent, disabled, className = '' }: {
   button: LayoutButton;
   label?: string;
   onPress: (command: string) => void;
   size?: 'sm' | 'md' | 'lg';
   accent?: boolean;
+  /** Edit mode: the button is only a thing to move, so it never sends. */
+  disabled?: boolean;
   className?: string;
 }) {
   const c = useColors();
@@ -35,6 +37,7 @@ export function KeyButton({ button, label, onPress, size = 'md', accent, classNa
   };
 
   const pressIn = () => {
+    if (disabled) return;
     fire();
     if (REPEATABLE.has(button.key)) {
       delay.current = setTimeout(() => {
@@ -43,7 +46,9 @@ export function KeyButton({ button, label, onPress, size = 'md', accent, classNa
     }
   };
 
-  const dims = { sm: 'min-h-[44px] min-w-[44px]', md: 'min-h-[52px]', lg: 'min-h-[64px]' }[size];
+  // Generous touch targets: the number keys are hidden by default, so the rest can be large.
+  const dims = { sm: 'min-h-[52px] min-w-[52px]', md: 'min-h-[64px]', lg: 'min-h-[80px]' }[size];
+  const iconSize = { sm: 22, md: 24, lg: 30 }[size];
   const text = label ?? button.label ?? button.key;
   const power = button.key.startsWith('POWER');
   const bg = accent
@@ -59,16 +64,16 @@ export function KeyButton({ button, label, onPress, size = 'md', accent, classNa
       onPressOut={stop}
       accessibilityRole="button"
       accessibilityLabel={text}
-      className={`flex-1 items-center justify-center rounded-2xl border border-slate-200 px-2 py-2 dark:border-[#252d45] ${dims} ${bg} ${className}`}>
+      className={`flex-1 items-center justify-center rounded-3xl border border-slate-200 px-2 py-2 dark:border-[#252d45] ${dims} ${bg} ${className}`}>
       {button.icon ? (
         <View className="items-center gap-0.5">
-          <Icon name={button.icon} size={size === 'lg' ? 26 : 20} color={fg} />
+          <Icon name={button.icon} size={iconSize} color={fg} />
           {size !== 'sm' && !['chevron-up', 'chevron-down', 'chevron-left', 'chevron-right'].includes(button.icon) ? (
-            <Text style={{ color: fg }} className="text-[11px] font-medium" numberOfLines={1}>{text}</Text>
+            <Text style={{ color: fg }} className="text-xs font-medium" numberOfLines={1}>{text}</Text>
           ) : null}
         </View>
       ) : (
-        <Text style={{ color: fg }} className="text-base font-semibold" numberOfLines={1}>{text}</Text>
+        <Text style={{ color: fg }} className="text-lg font-semibold" numberOfLines={1}>{text}</Text>
       )}
     </Pressable>
   );

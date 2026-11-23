@@ -118,6 +118,13 @@ Dev DB totals after all imports: 11,183 published remotes, 1,912 brands, 10,938 
 ## Notification controls
 Remote screen > options (...) > "Show in notifications" pins an ongoing, silent notification with up to four buttons (power, volume, mute, channel; first usable IR codes). Buttons broadcast to `IrActionReceiver`, which transmits through the phone's IR blaster directly, so the app need not be open. Only one remote is pinned at a time. Phone-IR remotes only: Wi-Fi, Bluetooth and hub-linked remotes do not qualify. Android 13+ asks for the notification permission the first time. Code: `android/.../notify/*`, `src/lib/notificationActions.ts`, `src/native/UnimoteNotify.ts`.
 
+## Remote screen: bigger buttons, folded numbers, customizing
+- **Numbers are hidden by default.** A template's keypad is split in the app (`src/lib/remoteLayout.ts`): the digits 0-9 become a collapsible "Numbers" block behind a **Numbers** button; its other keys (Last, Guide) stay on screen as "More". No backend change; old cached layouts work too.
+- **Bigger buttons:** `KeyButton` sizes are 52 / 64 / 80 px (small / normal / large); rows of more than 5 wrap to 3 columns.
+- **Customize layout** (button under the remote, or Remote options > Customize layout): hold a button for about a quarter of a second, then drag it onto another to swap places; **x** hides a button (a tray lists hidden ones so they can be brought back); the arrows move a whole group; the eye hides a group; **Reset** undoes everything. While customizing, buttons never send a signal. D-pad and volume/channel rockers keep their shape (they can be moved or hidden as a group). Air-conditioner remotes are not customizable (they use the AC panel).
+- **Where it is stored:** `SavedRemote.settings.layout` (`showNumbers`, `hidden`, `hiddenBlocks`, `order`, `blocks`), so it is per remote and rides the normal account sync. Code: `RemoteRenderer.tsx`, `ReorderGrid.tsx` (React Native `PanResponder`, no extra native library), logic and tests in `remoteLayout.ts` / `__tests__/remoteLayout.test.ts`.
+- **Moving a button into a different group is not supported yet.**
+
 ## Android TV / Google TV over Wi-Fi
 Covers Sony, TCL, Hisense, Philips, Xiaomi, Nvidia Shield and Chromecast with Google TV (Android TV "Remote v2"). **Not Fire TV** (different, undocumented protocol): Fire TV works only through the Bluetooth route.
 

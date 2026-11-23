@@ -7,6 +7,7 @@ import { Icon } from '../components/Icon';
 import { AcPanel } from '../components/remote/AcPanel';
 import { RemoteRenderer } from '../components/remote/RemoteRenderer';
 import { isAcRemote, type AcState } from '../lib/acState';
+import type { LayoutPrefs } from '../lib/remoteLayout';
 import { Btn, Card, Chip, Input, Loading, Screen, Txt } from '../components/ui';
 import { PROTOCOL_LABEL } from '../lib/categories';
 import type { RootStackParamList } from '../navigation/types';
@@ -32,6 +33,8 @@ export function RemoteScreen() {
   const toast = useUi(s => s.show);
   const [menu, setMenu] = useState(false);
   const [emitter, setEmitter] = useState<boolean | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [dragging, setDragging] = useState(false);
 
   useEffect(() => {
     UnimoteIr.hasIrEmitter().then(setEmitter).catch(() => setEmitter(false));
@@ -59,6 +62,15 @@ export function RemoteScreen() {
     return <Screen><Loading label="Loading…" /></Screen>;
   }
 
+  const prefs = saved.settings.layout as LayoutPrefs | undefined;
+  const savePrefs = (next: LayoutPrefs | null) => {
+    const cur = { ...(useLibrary.getState().remotes.find(r => r.id === id)?.settings ?? {}) };
+    if (next && Object.keys(next).length) cur.layout = next;
+    else delete cur.layout;
+    updateRemote(id, { settings: cur });
+  };
+  const ac = isAcRemote(remote);
+
   const press = async (command: string) => {
     const res = await sendCommand(remote, command, {
       settings: saved.settings,
@@ -76,7 +88,17 @@ export function RemoteScreen() {
 
   return (
     <Screen>
-      <ScrollView contentContainerClassName="pb-10 pt-1" showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerClassName="pb-10 pt-1" showsVerticalScrollIndicator={false} scrollEnabled={!dragging}>
+        {editing && (
+          <Card className="mb-3 gap-3 border-indigo-300 bg-indigo-50 dark:border-indigo-500/40 dark:bg-indigo-500/10">
+            <Txt variant="body" className="font-semibold">Customize this remote</Txt>
+            <Txt variant="muted">Hold a button, then drag it onto another to swap places. Tap × to hide one, or use the arrows to move a whole group.</Txt>
+            <View className="flex-row gap-2">
+              <View className="flex-1"><Btn title="Reset" variant="secondary" icon="rotate-ccw" onPress={() => savePrefs(null)} /></View>
+              <View className="flex-1"><Btn title="Done" icon="check" onPress={() => setEditing(false)} /></View>
+            </View>
+          </Card>
+        )}
         {remote.protocol === 'ir' && emitter === false && !hubFromSettings(saved.settings) && (
           <Card className="mb-3 flex-row items-center gap-3 border-amber-300 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10">
             <Icon name="triangle-alert" size={20} color="#d97706" />
@@ -91,7 +113,7 @@ export function RemoteScreen() {
             <Btn title="Connect" onPress={() => nav.navigate('ConnectDevice', { id })} />
           </Card>
         )}
-        {isAcRemote(remote) ? (
+        {ac ? (
           <AcPanel
             remote={remote}
             state={saved.settings.ac as AcState | undefined}
@@ -102,18 +124,30 @@ export function RemoteScreen() {
             onSend={press}
           />
         ) : (
-          <RemoteRenderer remote={remote} onPress={press} />
+          <RemoteRenderer
+            remote={remote}
+            prefs={prefs}
+            onPrefs={savePrefs}
+            editing={editing}
+            onPress={press}
+            onDragActive={setDragging}
+          />
         )}
-        <Txt variant="muted" className="mt-6 text-center">
+        {!ac && !editing && (
+          <View className="mt-6 items-center">
+            <Btn title="Customize layout" variant="ghost" icon="layout-grid" onPress={() => setEditing(true)} />
+          </View>
+        )}
+        <Txt variant="muted" className="mt-2 text-center">
           {remote.name} · {PROTOCOL_LABEL[remote.protocol]}
         </Txt>
       </ScrollView>
-      <ManageModal visible={menu} onClose={() => setMenu(false)} id={id} onDeleted={() => nav.goBack()} />
+      <ManageModal visible={menu} onClose={() => setMenu(false)} id={id} onDeleted={() => nav.goBack()} onCustomize={ac ? undefined : () => { setMenu(false); setEditing(true); }} />
     </Screen>
   );
 }
 
-function ManageModal({ visible, onClose, id, onDeleted }: { visible: boolean; onClose: () => void; id: string; onDeleted: () => void }) {
+function ManageModal({ visible, onClose, id, onDeleted, onCustomize }: { visible: boolean; onClose: () => void; id: string; onDeleted: () => void; onCustomize?: () => void }) {
   const saved = useLibrary(s => s.remotes.find(r => r.id === id));
   const rooms = useLibrary(s => s.rooms);
   const update = useLibrary(s => s.updateRemote);
@@ -165,6 +199,7 @@ function ManageModal({ visible, onClose, id, onDeleted }: { visible: boolean; on
           ))}
         </ScrollView>
         <View className="mt-2 gap-2">
+          {onCustomize ? <Btn title="Customize layout" variant="secondary" icon="layout-grid" onPress={onCustomize} /> : null}
           {UnimoteNotify.available && notifyActions.length ? (
             <Btn title={pinned ? 'Remove from notifications' : 'Show in notifications'} variant="secondary" icon="bell" onPress={togglePinned} />
           ) : null}

@@ -82,6 +82,8 @@ Tests (last run): backend 86 specs, app 88 jest tests, Android 42 JVM tests, all
 - [~] E11 "Add a remote" starts with a scan (like Mi Remote): Wi-Fi (Roku / Samsung / LG via SSDP, Android TV via mDNS, Broadlink hubs) and paired Bluetooth devices; anything not found falls through to choose-by-device-type and Record
 - [~] E12 Android TV / Google TV over Wi-Fi (Remote v2: TLS client certificate + 6-digit code pairing). Messages byte-identical to the open-source androidtvremote2 client; the real app paired with `unimote_app/tools/fake_android_tv.py` on the emulator (wrong-code retry, keys, reconnect after restart). Not a real TV
 
+- [~] E14 Remote screen redesign: bigger buttons, number keys folded behind a Numbers button by default, and a Customize mode (hold and drag to reorder, hide/restore buttons, move or hide groups, Reset), stored per remote and synced. Unit-tested; emulator check below. Not yet: moving a button into a different group
+
 ## F. Wrap-up
 - [x] F1 Docs: `docs/RUNBOOK.md` (+ Swagger at /api-docs)
 - [x] F2 End-to-end check on an Android emulator (IR flow, scenes, Roku against a fake device, request flow, Android TV against a fake TV)

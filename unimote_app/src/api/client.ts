@@ -26,7 +26,9 @@ export class ApiError extends Error {
 }
 
 /** Without a timeout a wrong/unreachable address leaves the UI loading forever. */
-const REQUEST_TIMEOUT_MS = 12_000;
+const REQUEST_TIMEOUT_MS = 25_000;
+/** Reads are safe to repeat: one automatic retry hides a dropped connection or a slow first byte. */
+const GET_ATTEMPTS = 2;
 
 type Query = Record<string, string | number | undefined>;
 
@@ -43,27 +45,33 @@ async function request<T>(
     .join('&');
   const url = `${apiUrl}${API_PREFIX}${path}${qs ? `?${qs}` : ''}`;
 
-  let res: Response;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    res = await fetch(url, {
-      signal: controller.signal,
-      method,
-      headers: {
-        Accept: 'application/json',
-        ...(opts.body ? { 'Content-Type': 'application/json' } : {}),
-        'X-Install-Id': installId,
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...opts.headers,
-      },
-      body: opts.body ? JSON.stringify(opts.body) : undefined,
-    });
-  } catch {
-    throw new ApiError(0, 'network', `Cannot reach the server${__DEV__ ? ` at ${apiUrl}` : ''}. Check your connection.`);
-  } finally {
-    clearTimeout(timer);
+  let res: Response | undefined;
+  const attempts = method === 'GET' ? GET_ATTEMPTS : 1;
+  for (let attempt = 1; attempt <= attempts && !res; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      res = await fetch(url, {
+        signal: controller.signal,
+        method,
+        headers: {
+          Accept: 'application/json',
+          ...(opts.body ? { 'Content-Type': 'application/json' } : {}),
+          'X-Install-Id': installId,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...opts.headers,
+        },
+        body: opts.body ? JSON.stringify(opts.body) : undefined,
+      });
+    } catch {
+      if (attempt === attempts) {
+        throw new ApiError(0, 'network', `Cannot reach the server${__DEV__ ? ` at ${apiUrl}` : ''}. Check your connection.`);
+      }
+    } finally {
+      clearTimeout(timer);
+    }
   }
+  if (!res) throw new ApiError(0, 'network', 'Cannot reach the server. Check your connection.');
 
   if (res.status === 204 || res.status === 304) {
     return { data: undefined as T, status: res.status, headers: res.headers };
