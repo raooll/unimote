@@ -1,7 +1,7 @@
 import type { Remote } from '../../api/types';
 import { toBase64 } from '../../lib/base64';
 import { LanSocket, SocketFactory, UnimoteLan } from '../../native/UnimoteLan';
-import { Driver, fail, ok, PairResult, SendResult } from '../types';
+import { Driver, fail, ok, PairResult, SendContext, SendResult } from '../types';
 import { safeJson, SessionCache, waitFor } from './session';
 
 const APP_NAME = 'Unimote';
@@ -51,6 +51,16 @@ export class SamsungSession {
     );
   }
 
+  /** Opens an installed app by its Tizen app id. */
+  async launchApp(appId: string): Promise<void> {
+    await this.socket.send(
+      JSON.stringify({
+        method: 'ms.channel.emit',
+        params: { event: 'ed.apps.launch', to: 'host', data: { appId, action_type: 'DEEP_LINK' } },
+      }),
+    );
+  }
+
   close() {
     this.closed = true;
     this.socket.close();
@@ -62,25 +72,32 @@ export function createSamsungDriver(factory: SocketFactory = UnimoteLan.openSock
   const sessions = new SessionCache<SamsungSession>();
   const mine = (r: Remote) => r.protocol === 'wifi' && r.signal_data.driver === 'samsung_tizen';
 
+  /** Runs `act` on the TV's open session (connecting first), keeping a newly issued token. */
+  const withSession = async (ctx: SendContext, act: (s: SamsungSession) => Promise<void>): Promise<SendResult> => {
+    const host = ctx.settings.host;
+    if (typeof host !== 'string' || !host) return fail('needs_setup', 'Connect to your Samsung TV first.');
+    const token = typeof ctx.settings.token === 'string' ? ctx.settings.token : undefined;
+    try {
+      const session = await sessions.get(host, () => SamsungSession.connect(host, token, factory));
+      if (session.token && session.token !== token) ctx.updateSettings?.({ token: session.token });
+      await act(session);
+      return ok;
+    } catch (e) {
+      sessions.drop(host);
+      return fail('unreachable', e instanceof Error ? e.message : "Can't reach the TV.");
+    }
+  };
+
   return {
     supports: mine,
 
     async send(remote, command, ctx): Promise<SendResult> {
-      const host = ctx.settings.host;
-      if (typeof host !== 'string' || !host) return fail('needs_setup', 'Connect to your Samsung TV first.');
       const key = remote.signal_data.commands[command];
       if (typeof key !== 'string') return fail('unknown_command', `This remote has no "${command}" button.`);
-      const token = typeof ctx.settings.token === 'string' ? ctx.settings.token : undefined;
-      try {
-        const session = await sessions.get(host, () => SamsungSession.connect(host, token, factory));
-        if (session.token && session.token !== token) ctx.updateSettings?.({ token: session.token });
-        await session.sendKey(key);
-        return ok;
-      } catch (e) {
-        sessions.drop(host);
-        return fail('unreachable', e instanceof Error ? e.message : "Can't reach the TV.");
-      }
+      return withSession(ctx, s => s.sendKey(key));
     },
+
+    launchApp: (_remote, appId, ctx) => withSession(ctx, s => s.launchApp(appId)),
 
     async pair(_remote, host, ctx): Promise<PairResult> {
       try {

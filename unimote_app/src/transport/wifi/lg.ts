@@ -133,6 +133,27 @@ export function createLgDriver(factory: SocketFactory = UnimoteLan.openSocket): 
       }
     },
 
+    async launchApp(_remote, appId, ctx): Promise<SendResult> {
+      const host = ctx.settings.host;
+      if (typeof host !== 'string' || !host) return fail('needs_setup', 'Connect to your LG TV first.');
+      const key = typeof ctx.settings.clientKey === 'string' ? ctx.settings.clientKey : undefined;
+      let session: LgSession;
+      try {
+        session = await sessions.get(host, () => LgSession.connect(host, key, factory));
+        if (session.clientKey && session.clientKey !== key) ctx.updateSettings?.({ clientKey: session.clientKey });
+      } catch (e) {
+        sessions.drop(host);
+        return fail('unreachable', e instanceof Error ? e.message : "Can't reach the TV.");
+      }
+      try {
+        await session.request('ssap://system.launcher/launch', { id: appId });
+        return ok;
+      } catch {
+        // The TV answered but refused: almost always an app that is not installed.
+        return fail('error', 'The TV could not open this app. Is it installed?');
+      }
+    },
+
     async pair(_remote, host, ctx): Promise<PairResult> {
       try {
         sessions.drop(host);

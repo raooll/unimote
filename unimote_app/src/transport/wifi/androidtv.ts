@@ -1,9 +1,10 @@
 import type { Remote } from '../../api/types';
 import { ATV_KEYCODES } from '../../lib/atvKeys';
 import { AtvError, DIRECTION_SHORT, UnimoteAtv } from '../../native/UnimoteAtv';
-import { Driver, fail, ok, PairResult } from '../types';
+import { androidTvAppLink } from '../../lib/appShortcuts';
+import { Driver, fail, ok, PairResult, SendContext, SendResult } from '../types';
 
-type Atv = Pick<typeof UnimoteAtv, 'sendKey' | 'pairStart' | 'pairFinish' | 'disconnect'>;
+type Atv = Pick<typeof UnimoteAtv, 'sendKey' | 'launchApp' | 'pairStart' | 'pairFinish' | 'disconnect'>;
 
 const MAX_CODE_TRIES = 3;
 
@@ -16,25 +17,31 @@ function describe(e: unknown): { code: string; message: string } {
 export function createAndroidTvDriver(atv: Atv = UnimoteAtv): Driver {
   const mine = (r: Remote) => r.protocol === 'wifi' && r.signal_data.driver === 'android_tv';
 
+  const run = async (ctx: SendContext, act: (host: string) => Promise<void>): Promise<SendResult> => {
+    const host = ctx.settings.host;
+    if (typeof host !== 'string' || !host) return fail('needs_setup', 'Connect to your TV first.');
+    try {
+      await act(host);
+      return ok;
+    } catch (e) {
+      const { code: c, message } = describe(e);
+      if (c === 'not_paired') return fail('pairing_failed', 'This phone is not paired with the TV any more. Connect it again.');
+      if (c === 'unreachable') return fail('unreachable', "Can't reach the TV. Is it on, and on the same Wi-Fi?");
+      return fail('error', message);
+    }
+  };
+
   return {
     supports: mine,
 
     async send(remote, command, ctx) {
-      const host = ctx.settings.host;
-      if (typeof host !== 'string' || !host) return fail('needs_setup', 'Connect to your TV first.');
       const keyName = remote.signal_data.commands[command];
       const code = typeof keyName === 'string' ? ATV_KEYCODES[keyName] : undefined;
       if (code === undefined) return fail('unknown_command', `This TV profile has no "${command}" button.`);
-      try {
-        await atv.sendKey(host, code, DIRECTION_SHORT);
-        return ok;
-      } catch (e) {
-        const { code: c, message } = describe(e);
-        if (c === 'not_paired') return fail('pairing_failed', 'This phone is not paired with the TV any more. Connect it again.');
-        if (c === 'unreachable') return fail('unreachable', "Can't reach the TV. Is it on, and on the same Wi-Fi?");
-        return fail('error', message);
-      }
+      return run(ctx, host => atv.sendKey(host, code, DIRECTION_SHORT));
     },
+
+    launchApp: (_remote, appId, ctx) => run(ctx, host => atv.launchApp(host, androidTvAppLink(appId))),
 
     async pair(_remote, host, _ctx, askCode): Promise<PairResult> {
       if (!host) return { ok: false, code: 'error', message: 'Pick your TV first.' };

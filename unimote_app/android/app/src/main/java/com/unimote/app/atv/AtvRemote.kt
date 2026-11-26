@@ -26,10 +26,14 @@ class AtvRemote(private val identity: AtvIdentity, private val host: String, pri
     }
   }
 
-  fun sendKey(keyCode: Int, direction: Int = AtvProto.DIRECTION_SHORT) {
+  fun sendKey(keyCode: Int, direction: Int = AtvProto.DIRECTION_SHORT) = send(AtvProto.keyInject(keyCode, direction))
+
+  fun launchApp(appLink: String) = send(AtvProto.appLinkLaunch(appLink))
+
+  private fun send(body: ByteArray) {
     if (closed) throw AtvException("unreachable", "The TV connection was lost.")
     try {
-      write(AtvProto.keyInject(keyCode, direction))
+      write(body)
     } catch (e: Exception) {
       close()
       throw AtvException("unreachable", "The TV connection was lost.", e)

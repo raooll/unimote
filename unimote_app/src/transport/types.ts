@@ -27,6 +27,8 @@ export type AskCode = (hint?: string) => Promise<string | null>;
 export interface Driver {
   supports(remote: Remote): boolean;
   send(remote: Remote, command: string, ctx: SendContext): Promise<SendResult>;
+  /** Open an app on the device; `appId` is the platform's own id for it (see `lib/appShortcuts`). */
+  launchApp?(remote: Remote, appId: string, ctx: SendContext): Promise<SendResult>;
   /** Connect/pair with the device at `host`; returns settings to persist. Drivers that need no pairing omit it. */
   pair?(remote: Remote, host: string, ctx: SendContext, askCode?: AskCode): Promise<PairResult>;
 }

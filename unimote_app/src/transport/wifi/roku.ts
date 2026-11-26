@@ -25,6 +25,18 @@ export function createRokuDriver(http: HttpFn = UnimoteLan.http): Driver {
       }
     },
 
+    async launchApp(remote, appId, ctx) {
+      const host = ctx.settings.host;
+      if (typeof host !== 'string' || !host) return fail('needs_setup', 'Connect to your Roku first.');
+      try {
+        const res = await http('POST', `${base(remote, host)}/launch/${encodeURIComponent(appId)}`, { body: '', timeoutMs: 4000 });
+        if (res.status >= 200 && res.status < 300) return ok;
+        return fail('error', res.status === 404 ? 'This app is not installed on the Roku.' : `The Roku answered ${res.status}.`);
+      } catch {
+        return fail('unreachable', "Can't reach the Roku. Is it on the same Wi-Fi?");
+      }
+    },
+
     async pair(remote, host): Promise<PairResult> {
       try {
         const res = await http('GET', `${base(remote, host)}/query/device-info`, { timeoutMs: 2500 });
