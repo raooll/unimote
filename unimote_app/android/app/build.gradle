@@ -72,6 +72,11 @@ def enableProguardInReleaseBuilds = false
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+/**
+ * Upload keystore for release builds, supplied by the environment (see fastlane/.env.example).
+ */
+def releaseKeystore = System.getenv("ANDROID_KEYSTORE_PATH")
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -82,7 +87,8 @@ android {
         applicationId "com.unimote.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
+        // Release automation passes -PversionCodeOverride=<n>
+        versionCode((findProperty("versionCodeOverride") ?: "1").toString().toInteger())
         versionName "1.0"
     }
     signingConfigs {
@@ -92,18 +98,32 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            if (releaseKeystore) {
+                storeFile file(releaseKeystore)
+                storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
+    }
+}
+
+// Never fall back to the debug key: stop release packaging when no upload keystore is configured.
+gradle.taskGraph.whenReady { graph ->
+    def packaging = ["packageRelease", "packageReleaseBundle", "signReleaseBundle"]
+    if (!releaseKeystore && graph.allTasks.any { it.project == project && packaging.contains(it.name) }) {
+        throw new GradleException("Release signing is not configured. Set ANDROID_KEYSTORE_PATH, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD.")
     }
 }
 
