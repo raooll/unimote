@@ -5,6 +5,7 @@ interface NativeAtv {
   pairStart(host: string, clientName: string): Promise<void>;
   pairFinish(host: string, code: string): Promise<void>;
   sendKey(host: string, keyCode: number, direction: number): Promise<void>;
+  launchApp(host: string, appLink: string): Promise<void>;
   disconnect(host: string): Promise<void>;
 }
 export interface AtvDevice {
@@ -35,6 +36,11 @@ export const UnimoteAtv = {
   sendKey(host: string, keyCode: number, direction = DIRECTION_SHORT): Promise<void> {
     if (!native) return Promise.reject({ code: 'error', message: 'Android TV control is not available in this build' } as AtvError);
     return native.sendKey(host, keyCode, direction);
+  },
+  /** Opens an app link on the TV, e.g. `market://launch?id=com.netflix.ninja`. */
+  launchApp(host: string, appLink: string): Promise<void> {
+    if (!native) return Promise.reject({ code: 'error', message: 'Android TV control is not available in this build' } as AtvError);
+    return native.launchApp(host, appLink);
   },
   disconnect: (host: string): Promise<void> => (native ? native.disconnect(host) : Promise.resolve()),
 };

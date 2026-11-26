@@ -86,6 +86,8 @@ object AtvProto {
   fun remoteSetActive(features: Long = FEATURES) = Writer().msg(2) { uint(1, features) }.toBytes()
   fun pingResponse(value: Long) = Writer().msg(9) { uint(1, value) }.toBytes()
   fun keyInject(keyCode: Int, direction: Int = DIRECTION_SHORT) = Writer().msg(10) { uint(1, keyCode.toLong()); uint(2, direction.toLong()) }.toBytes()
+  /** RemoteAppLinkLaunchRequest: opens a link on the TV, e.g. "market://launch?id=com.netflix.ninja" starts that app. */
+  fun appLinkLaunch(appLink: String) = Writer().msg(90) { str(1, appLink) }.toBytes()
 
   sealed class Remote {
     data class Configure(val features: Long) : Remote()

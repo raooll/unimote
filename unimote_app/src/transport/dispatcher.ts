@@ -1,3 +1,4 @@
+import { type AppShortcut, platformOf } from '../lib/appShortcuts';
 import { decodeBroadlink } from '../lib/broadlink';
 import type { Remote } from '../api/types';
 import type { SsdpDevice } from '../native/UnimoteLan';
@@ -36,6 +37,16 @@ export async function sendCommand(remote: Remote, command: string, ctx: SendCont
   const driver = driverFor(remote);
   if (!driver) return fail('unsupported', `${labelFor(remote)} remotes are not supported yet.`);
   return driver.send(remote, command, ctx);
+}
+
+/** Open an app from the remote's app row: the IR remote's own app button, or a launch request over Wi-Fi. */
+export async function launchApp(remote: Remote, shortcut: AppShortcut, ctx: SendContext = { settings: {} }): Promise<SendResult> {
+  if (shortcut.irKey) return sendCommand(remote, shortcut.irKey, ctx);
+  const platform = platformOf(remote);
+  const appId = platform ? shortcut.app.ids[platform] : undefined;
+  const driver = driverFor(remote);
+  if (!appId || !driver?.launchApp) return fail('unsupported', `${shortcut.app.name} can't be opened on this device.`);
+  return driver.launchApp(remote, appId, ctx);
 }
 
 export function isSupported(remote: { protocol: Remote['protocol'] }): boolean {

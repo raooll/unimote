@@ -22,6 +22,7 @@ import java.util.concurrent.TimeUnit
  *   pairStart(host, clientName): Promise<void>             the TV now shows a 6-digit code
  *   pairFinish(host, code): Promise<void>                  rejects with code "bad_code" for a wrong code
  *   sendKey(host, keyCode, direction): Promise<void>       direction 3 = short press, 1/2 = long press start/end
+ *   launchApp(host, appLink): Promise<void>                e.g. "market://launch?id=com.netflix.ninja"
  *   disconnect(host): Promise<void>
  * Errors carry one of: unreachable, not_paired, bad_code, pairing_rejected, error.
  */
@@ -72,6 +73,18 @@ class UnimoteAtvModule(private val ctx: ReactApplicationContext) : ReactContextB
 
   @ReactMethod
   fun sendKey(host: String, keyCode: Int, direction: Int, promise: Promise) = run(promise) {
+    withRemote(host) { it.sendKey(keyCode, direction) }
+    promise.resolve(null)
+  }
+
+  @ReactMethod
+  fun launchApp(host: String, appLink: String, promise: Promise) = run(promise) {
+    withRemote(host) { it.launchApp(appLink) }
+    promise.resolve(null)
+  }
+
+  /** Runs `act` on the open connection to `host`, connecting first if needed. */
+  private fun withRemote(host: String, act: (AtvRemote) -> Unit) {
     var remote = remotes[host]
     if (remote == null || remote.closed) {
       remote?.close()
@@ -79,15 +92,14 @@ class UnimoteAtvModule(private val ctx: ReactApplicationContext) : ReactContextB
       remotes[host] = remote
     }
     try {
-      remote.sendKey(keyCode, direction)
+      act(remote)
     } catch (e: AtvException) {
       // the TV may have dropped an idle connection: reconnect once and retry
       remotes.remove(host)?.close()
       remote = AtvRemote(identity, host).also { it.connect() }
       remotes[host] = remote
-      remote.sendKey(keyCode, direction)
+      act(remote)
     }
-    promise.resolve(null)
   }
 
   @ReactMethod

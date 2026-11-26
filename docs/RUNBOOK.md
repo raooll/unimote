@@ -125,6 +125,12 @@ Remote screen > options (...) > "Show in notifications" pins an ongoing, silent 
 - **Where it is stored:** `SavedRemote.settings.layout` (`showNumbers`, `hidden`, `hiddenBlocks`, `order`, `blocks`), so it is per remote and rides the normal account sync. Code: `RemoteRenderer.tsx`, `ReorderGrid.tsx` (React Native `PanResponder`, no extra native library), logic and tests in `remoteLayout.ts` / `__tests__/remoteLayout.test.ts`.
 - **Moving a button into a different group is not supported yet.**
 
+## Remote screen: app shortcuts
+An **Apps** row at the top of the remote (YouTube, Netflix, Prime Video, JioHotstar, Disney+, Spotify, ZEE5, Sony LIV, Apple TV) opens that app on the TV.
+- **Wi-Fi TVs:** Roku `POST /launch/<channel id>`, Samsung Tizen `ed.apps.launch`, LG webOS `ssap://system.launcher/launch`, Android TV the Remote v2 app-link message (`market://launch?id=<package>`). An app is offered only where we have its id for that platform.
+- **IR remotes:** only the apps the remote has its own button for (`NETFLIX`, `YOUTUBE`, `PRIME_VIDEO`, ...), which sends that button.
+- App ids live in the app (`src/lib/appShortcuts.ts`), no backend change. Not checked on a real TV yet; JioHotstar, ZEE5 and Sony LIV are mapped for Android TV only.
+
 ## Android TV / Google TV over Wi-Fi
 Covers Sony, TCL, Hisense, Philips, Xiaomi, Nvidia Shield and Chromecast with Google TV (Android TV "Remote v2"). **Not Fire TV** (different, undocumented protocol): Fire TV works only through the Bluetooth route.
 

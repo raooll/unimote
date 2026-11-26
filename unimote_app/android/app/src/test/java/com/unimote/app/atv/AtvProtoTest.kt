@@ -26,6 +26,8 @@ class AtvProtoTest {
     assertArrayEquals(hex("4a020807"), AtvProto.pingResponse(7))
     assertArrayEquals(hex("5204081a1003"), AtvProto.keyInject(26))
     assertArrayEquals(hex("520508a4011001"), AtvProto.keyInject(164, AtvProto.DIRECTION_START_LONG))
+    // RemoteMessage.remote_app_link_launch_request (field 90) { app_link (field 1) = "market://launch?id=a.b" }
+    assertArrayEquals(hex("d205180a16") + "market://launch?id=a.b".toByteArray(), AtvProto.appLinkLaunch("market://launch?id=a.b"))
   }
 
   @Test fun parsesWhatATvSends() {

@@ -8,6 +8,7 @@ const remote = {
 
 const makeAtv = () => ({
   sendKey: jest.fn().mockResolvedValue(undefined),
+  launchApp: jest.fn().mockResolvedValue(undefined),
   pairStart: jest.fn().mockResolvedValue(undefined),
   pairFinish: jest.fn().mockResolvedValue(undefined),
   disconnect: jest.fn().mockResolvedValue(undefined),

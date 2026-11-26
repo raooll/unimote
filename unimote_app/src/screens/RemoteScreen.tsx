@@ -18,7 +18,10 @@ import { useLibrary } from '../store/library';
 import { useUi } from '../store/ui';
 import { useColors } from '../theme';
 import { hubFromSettings } from '../transport/irHub';
-import { needsDeviceSetup, sendCommand } from '../transport/dispatcher';
+import { launchApp, needsDeviceSetup, sendCommand } from '../transport/dispatcher';
+import type { SendResult } from '../transport/types';
+import { AppShortcuts } from '../components/remote/AppShortcuts';
+import { type AppShortcut, appShortcutsFor } from '../lib/appShortcuts';
 
 const isConnected = (s: Record<string, unknown>) => !!(s.host || s.deviceId || s.address);
 
@@ -71,20 +74,22 @@ export function RemoteScreen() {
   };
   const ac = isAcRemote(remote);
 
-  const press = async (command: string) => {
-    const res = await sendCommand(remote, command, {
-      settings: saved.settings,
-      // Read the latest settings so a token learned mid-session is never overwritten by a stale copy.
-      updateSettings: patch => {
-        const cur = useLibrary.getState().remotes.find(r => r.id === id)?.settings ?? {};
-        updateRemote(id, { settings: { ...cur, ...patch } });
-      },
-    });
-    if (!res.ok) {
-      toast(res.message, 'error');
-      if (res.code === 'needs_setup') nav.navigate('ConnectDevice', { id });
-    }
+  const ctx = {
+    settings: saved.settings,
+    // Read the latest settings so a token learned mid-session is never overwritten by a stale copy.
+    updateSettings: (patch: Record<string, unknown>) => {
+      const cur = useLibrary.getState().remotes.find(r => r.id === id)?.settings ?? {};
+      updateRemote(id, { settings: { ...cur, ...patch } });
+    },
   };
+  const report = (res: SendResult) => {
+    if (res.ok) return;
+    toast(res.message, 'error');
+    if (res.code === 'needs_setup') nav.navigate('ConnectDevice', { id });
+  };
+  const press = async (command: string) => report(await sendCommand(remote, command, ctx));
+  const openApp = async (shortcut: AppShortcut) => report(await launchApp(remote, shortcut, ctx));
+  const apps = ac ? [] : appShortcutsFor(remote);
 
   return (
     <Screen>
@@ -113,6 +118,7 @@ export function RemoteScreen() {
             <Btn title="Connect" onPress={() => nav.navigate('ConnectDevice', { id })} />
           </Card>
         )}
+        {!editing && <AppShortcuts shortcuts={apps} onLaunch={openApp} />}
         {ac ? (
           <AcPanel
             remote={remote}
