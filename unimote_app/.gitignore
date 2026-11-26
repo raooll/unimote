@@ -73,3 +73,21 @@ yarn-error.log
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+# Release secrets (never commit)
+.env
+.env.*
+!.env.example
+secrets/
+*.p8
+*.p12
+*.jks
+*.mobileprovision
+*.cer
+*service-account*.json
+*play-store*.json
+fastlane/*.json
+
+# fastlane run artifacts
+fastlane/report.xml
+fastlane/README.md

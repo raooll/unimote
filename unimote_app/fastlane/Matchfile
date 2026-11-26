@@ -1,0 +1,5 @@
+# The certificates repository and its passphrase come from the environment (see .env.example).
+git_url(ENV["MATCH_GIT_URL"])
+storage_mode("git")
+type("appstore")
+app_identifier(["com.unimote.app"])

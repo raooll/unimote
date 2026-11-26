@@ -1,0 +1,130 @@
+# Release lanes. Secrets come from the environment or fastlane/.env (git-ignored); see .env.example.
+require "supply"
+
+skip_docs
+
+ROOT = File.expand_path("..", __dir__)
+APP_ID = "com.unimote.app"
+IOS_TARGET = "unimote_app"
+XCODEPROJ = File.join(ROOT, "ios", "unimote_app.xcodeproj")
+WORKSPACE = File.join(ROOT, "ios", "unimote_app.xcworkspace")
+
+def require_env!(*names)
+  missing = names.select { |n| ENV[n].to_s.strip.empty? }
+  UI.user_error!("Missing environment variables: #{missing.join(', ')} (see fastlane/.env.example)") unless missing.empty?
+end
+
+def require_file!(name)
+  path = File.expand_path(ENV.fetch(name), ROOT)
+  UI.user_error!("#{name} points to a file that does not exist: #{path}") unless File.file?(path)
+  path
+end
+
+def asc_api_key
+  require_env!("ASC_KEY_ID", "ASC_ISSUER_ID", "ASC_KEY_PATH")
+  app_store_connect_api_key(
+    key_id: ENV["ASC_KEY_ID"],
+    issuer_id: ENV["ASC_ISSUER_ID"],
+    key_filepath: require_file!("ASC_KEY_PATH")
+  )
+end
+
+# Highest version code Google Play knows about: every uploaded bundle and APK, plus every track.
+def highest_play_version_code(json_key)
+  params = FastlaneCore::Configuration.create(Supply::Options.available_options, { package_name: APP_ID, json_key: json_key })
+  Supply.config = params
+  client = Supply::Client.make_from_config(params: params)
+  client.begin_edit(package_name: APP_ID)
+  begin
+    codes = client.aab_version_codes + client.apks_version_codes
+    codes += client.tracks.flat_map { |t| Array(t.releases).flat_map { |r| Array(r.version_codes) } }
+    codes.compact.map(&:to_i).max || 0
+  ensure
+    client.abort_current_edit # read only: nothing is committed
+  end
+end
+
+platform :ios do
+  desc "Build and upload to TestFlight (match is read-only)"
+  lane :beta do
+    require_env!("APPLE_TEAM_ID", "MATCH_GIT_URL", "MATCH_PASSWORD")
+    api_key = asc_api_key
+    setup_ci if ENV["CI"]
+
+    match(type: "appstore", readonly: true, api_key: api_key)
+    profile = ENV.fetch("sigh_#{APP_ID}_appstore_profile-name")
+
+    build_number = latest_testflight_build_number(api_key: api_key, app_identifier: APP_ID, initial_build_number: 0).to_i + 1
+
+    cocoapods(podfile: File.join(ROOT, "ios", "Podfile"))
+
+    # Manual signing is applied only for this build, then the project file is put back.
+    pbxproj = File.join(XCODEPROJ, "project.pbxproj")
+    original = File.binread(pbxproj)
+    begin
+      update_code_signing_settings(
+        path: XCODEPROJ,
+        use_automatic_signing: false,
+        team_id: ENV["APPLE_TEAM_ID"],
+        targets: [IOS_TARGET],
+        build_configurations: ["Release"],
+        code_sign_identity: "Apple Distribution",
+        profile_name: profile
+      )
+      build_app(
+        workspace: WORKSPACE,
+        scheme: IOS_TARGET,
+        configuration: "Release",
+        export_method: "app-store",
+        export_options: { signingStyle: "manual", teamID: ENV["APPLE_TEAM_ID"], provisioningProfiles: { APP_ID => profile } },
+        # Passed at build time, so a release leaves no version change to commit.
+        xcargs: "CURRENT_PROJECT_VERSION=#{build_number}",
+        output_directory: File.join(ROOT, "build", "ios")
+      )
+    ensure
+      File.binwrite(pbxproj, original)
+    end
+
+    upload_to_testflight(api_key: api_key, app_identifier: APP_ID, skip_waiting_for_build_processing: true)
+  end
+
+  desc "CREATES an Apple Distribution certificate and App Store profile if the match repo has none"
+  lane :certificates do
+    require_env!("APPLE_TEAM_ID", "MATCH_GIT_URL", "MATCH_PASSWORD")
+    UI.user_error!("This can create a certificate on your Apple account. Re-run with ALLOW_CERT_CREATION=yes") unless ENV["ALLOW_CERT_CREATION"] == "yes"
+    match(type: "appstore", readonly: false, api_key: asc_api_key)
+  end
+end
+
+platform :android do
+  desc "Build a signed AAB and upload it to the Play internal testing track"
+  lane :internal do
+    require_env!("ANDROID_KEYSTORE_PATH", "ANDROID_KEYSTORE_PASSWORD", "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD", "PLAY_JSON_KEY_PATH")
+    ENV["ANDROID_KEYSTORE_PATH"] = require_file!("ANDROID_KEYSTORE_PATH") # Gradle needs the absolute path
+    json_key = require_file!("PLAY_JSON_KEY_PATH")
+
+    version_code = highest_play_version_code(json_key) + 1
+    UI.message("Building version code #{version_code}")
+
+    gradle(
+      project_dir: File.join(ROOT, "android"),
+      task: "bundle",
+      build_type: "Release",
+      properties: { "versionCodeOverride" => version_code }
+    )
+
+    upload_to_play_store(
+      package_name: APP_ID,
+      json_key: json_key,
+      track: "internal",
+      # Use "draft" while the app has never been published.
+      release_status: ENV["PLAY_RELEASE_STATUS"].to_s.empty? ? "completed" : ENV["PLAY_RELEASE_STATUS"],
+      aab: lane_context[SharedValues::GRADLE_AAB_OUTPUT_PATH],
+      skip_upload_apk: true,
+      skip_upload_metadata: true,
+      skip_upload_changelogs: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+  end
+end
